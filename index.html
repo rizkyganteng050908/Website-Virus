@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CRITICAL KERNEL TELEMETRY - FAULT DETECTED</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020603;
+            font-family: 'Courier New', Courier, monospace;
+            color: #00ff66;
+        }
+
+        /* Matrix Canvas Background */
+        #matrixCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            display: block;
+        }
+
+        /* CRT Scanlines Overlay */
+        .scanline-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.45) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        /* Alarm Red Flash Screen */
+        .alarm-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2.5;
+            background: rgba(255, 0, 50, 0.22);
+            pointer-events: none;
+            animation: flashRed 0.5s infinite alternate;
+        }
+
+        @keyframes flashRed {
+            0% { opacity: 0.1; }
+            100% { opacity: 0.8; }
+        }
+
+        /* UI Container Layer */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 3;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+        }
+
+        /* Top Right Control Buttons */
+        .control-bar {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 10;
+            display: flex;
+            gap: 8px;
+        }
+
+        .ctrl-btn {
+            background: rgba(0, 30, 10, 0.85);
+            border: 1px solid #00ff66;
+            color: #00ff66;
+            padding: 6px 12px;
+            font-family: inherit;
+            font-size: clamp(10px, 2.5vw, 12px);
+            font-weight: bold;
+            letter-spacing: 1px;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(0, 255, 102, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .ctrl-btn:hover, .ctrl-btn:active {
+            background: #00ff66;
+            color: #000;
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.6);
+        }
+
+        /* Terminal Card (Responsive Dimensions) */
+        .terminal-card {
+            width: 100%;
+            max-width: 780px;
+            max-height: 92vh;
+            background: rgba(4, 16, 8, 0.94);
+            border: 2px solid #00ff66;
+            border-radius: 8px;
+            box-shadow: 0 0 35px rgba(0, 255, 102, 0.3), inset 0 0 15px rgba(0, 255, 102, 0.1);
+            backdrop-filter: blur(6px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: border-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .terminal-card.breach-alert {
+            border-color: #ff0044;
+            box-shadow: 0 0 45px rgba(255, 0, 68, 0.65), inset 0 0 20px rgba(255, 0, 68, 0.25);
+            animation: pulseWarning 0.8s infinite alternate;
+        }
+
+        @keyframes pulseWarning {
+            0% { box-shadow: 0 0 25px rgba(255, 0, 68, 0.4); }
+            100% { box-shadow: 0 0 55px rgba(255, 0, 68, 0.85); }
+        }
+
+        .terminal-header {
+            background: rgba(0, 40, 15, 0.9);
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #00ff66;
+            flex-shrink: 0;
+        }
+
+        .terminal-card.breach-alert .terminal-header {
+            background: rgba(60, 0, 12, 0.95);
+            border-bottom-color: #ff0044;
+        }
+
+        .header-title {
+            font-size: clamp(10px, 3vw, 13px);
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #00ff66;
+            box-shadow: 0 0 8px #00ff66;
+            flex-shrink: 0;
+            animation: blinkDot 1s infinite alternate;
+        }
+
+        .terminal-card.breach-alert .status-dot {
+            background-color: #ff0044;
+            box-shadow: 0 0 8px #ff0044;
+        }
+
+        @keyframes blinkDot {
+            0% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+
+        .terminal-body {
+            padding: clamp(12px, 3.5vw, 24px);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+        }
+
+        .title-banner {
+            font-size: clamp(14px, 4vw, 20px);
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            color: #00ff66;
+            text-shadow: 0 0 8px rgba(0, 255, 102, 0.5);
+            line-height: 1.3;
+        }
+
+        .terminal-card.breach-alert .title-banner {
+            color: #ff3355;
+            text-shadow: 0 0 10px rgba(255, 51, 85, 0.7);
+        }
+
+        /* Log Box Height Adapts via vh & Flex */
+        .log-display {
+            height: clamp(140px, 28vh, 230px);
+            background: rgba(0, 0, 0, 0.88);
+            border: 1px solid rgba(0, 255, 102, 0.3);
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: clamp(11px, 2.8vw, 13px);
+            line-height: 1.55;
+            overflow-y: auto;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.9);
+            scroll-behavior: smooth;
+        }
+
+        .log-line {
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .log-line.danger {
+            color: #ff3355;
+            font-weight: bold;
+        }
+
+        .log-line.warning {
+            color: #ffcc00;
+        }
+
+        /* Progress Bar Section */
+        .progress-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: clamp(10px, 2.8vw, 12px);
+            font-weight: bold;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: clamp(18px, 3vh, 22px);
+            background: rgba(0, 20, 5, 0.8);
+            border: 1px solid #00ff66;
+            border-radius: 4px;
+            padding: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #00aa44, #00ff66);
+            border-radius: 2px;
+            box-shadow: 0 0 12px rgba(0, 255, 102, 0.6);
+            transition: width 0.2s linear, background 0.4s ease;
+        }
+
+        .terminal-card.breach-alert .progress-fill {
+            background: linear-gradient(90deg, #cc0033, #ff3355);
+            box-shadow: 0 0 12px rgba(255, 51, 85, 0.7);
+        }
+
+        /* Input Controls Area */
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .terminal-input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid #00ff66;
+            color: #00ff66;
+            font-family: inherit;
+            padding: 8px 12px;
+            font-size: clamp(11px, 2.8vw, 13px);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        .terminal-input:focus {
+            box-shadow: 0 0 10px rgba(0, 255, 102, 0.5);
+        }
+
+        /* Initial Audio/Interaction Prompt */
+        .start-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .start-card {
+            background: rgba(5, 20, 10, 0.96);
+            border: 2px solid #00ff66;
+            padding: clamp(20px, 5vw, 35px);
+            border-radius: 10px;
+            text-align: center;
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 0 30px rgba(0, 255, 102, 0.4);
+        }
+
+        .start-btn {
+            margin-top: 20px;
+            padding: 12px 24px;
+            font-size: clamp(12px, 3.2vw, 15px);
+            font-weight: bold;
+            letter-spacing: 1px;
+            background: #00ff66;
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.6);
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .start-btn:hover, .start-btn:active {
+            transform: scale(1.02);
+            box-shadow: 0 0 25px rgba(0, 255, 102, 0.9);
+        }
+
+        /* Critical Lockdown Modal */
+        .lockdown-modal {
+            display: none;
+            position: absolute;
+            z-index: 30;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: calc(100% - 32px);
+            max-width: 580px;
+            background: rgba(20, 0, 5, 0.97);
+            border: 2px solid #ff0044;
+            border-radius: 10px;
+            padding: clamp(20px, 5vw, 30px);
+            text-align: center;
+            box-shadow: 0 0 60px rgba(255, 0, 68, 0.85);
+            animation: popUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes popUp {
+            0% { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        .lockdown-icon {
+            font-size: clamp(36px, 10vw, 50px);
+            margin-bottom: 8px;
+            color: #ff0044;
+            display: inline-block;
+            animation: blinkDot 0.6s infinite alternate;
+        }
+
+        .lockdown-title {
+            color: #ff3355;
+            font-size: clamp(16px, 4.5vw, 22px);
+            font-weight: bold;
+            letter-spacing: 1.5px;
+            margin-bottom: 12px;
+            text-shadow: 0 0 12px rgba(255, 51, 85, 0.8);
+        }
+
+        .lockdown-desc {
+            color: #dddddd;
+            font-size: clamp(11px, 2.8vw, 13px);
+            line-height: 1.55;
+            margin-bottom: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 12px;
+            border: 1px solid rgba(255, 0, 68, 0.4);
+            border-radius: 6px;
+            text-align: left;
+            font-family: monospace;
+            word-break: break-all;
+        }
+
+        .override-btn {
+            background: transparent;
+            color: #ff3355;
+            font-weight: bold;
+            font-size: clamp(12px, 3vw, 14px);
+            padding: 10px 20px;
+            border: 1px solid #ff0044;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(255, 0, 68, 0.4);
+            transition: all 0.2s ease;
+            letter-spacing: 1px;
+            width: 100%;
+        }
+
+        .override-btn:hover, .override-btn:active {
+            background: #ff0044;
+            color: #fff;
+            box-shadow: 0 0 25px rgba(255, 0, 68, 0.8);
+        }
+
+        /* Responsive Adjustments for Mobile Landscape & Small Screens */
+        @media (max-height: 520px) {
+            .terminal-body {
+                padding: 10px;
+                gap: 8px;
+            }
+            .log-display {
+                height: 100px;
+            }
+            .title-banner {
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Matrix Canvas Background -->
+    <canvas id="matrixCanvas"></canvas>
+    
+    <!-- CRT Scanlines Overlay -->
+    <div class="scanline-overlay"></div>
+
+    <!-- Alarm Red Flashing Layer -->
+    <div class="alarm-overlay" id="alarmOverlay"></div>
+
+    <!-- Top Controls -->
+    <div class="control-bar">
+        <button class="ctrl-btn" id="soundToggleBtn">🔊 AUDIO: ON</button>
+        <button class="ctrl-btn" id="fullscreenBtn">⛶ FULLSCREEN</button>
+    </div>
+
+    <!-- Start Overlay (Required for Browser Audio Autoplay Compliance) -->
+    <div class="start-overlay" id="startOverlay">
+        <div class="start-card">
+            <h2 style="color: #00ff66; margin-bottom: 10px; letter-spacing: 2px; font-size: clamp(16px, 4vw, 20px);">SYSTEM TERMINAL INTERFACE</h2>
+            <p style="color: #a0ffa0; font-size: clamp(11px, 3vw, 13px); line-height: 1.5;">Initialize raw socket kernel diagnostics telemetry and monitor system block integrity.</p>
+            <button class="start-btn" id="startSimulationBtn">INITIALIZE TERMINAL TELEMETRY ⚡</button>
+        </div>
+    </div>
+
+    <!-- Main Terminal Interface -->
+    <div class="ui-layer">
+        <div class="terminal-card" id="terminalCard">
+            <div class="terminal-header">
+                <div class="header-title">
+                    <div class="status-dot"></div>
+                    <span id="headerStatusText">UNAUTHORIZED KERNEL EXFILTRATION</span>
+                </div>
+                <div style="font-size: clamp(9px, 2.2vw, 11px); opacity: 0.8; margin-left: 6px;">NODE:#9082-SEC</div>
+            </div>
+
+            <div class="terminal-body">
+                <div class="title-banner" id="mainTitleBanner">⚠️ CRITICAL SECURITY BREACH DETECTED</div>
+
+                <div class="log-display" id="logDisplay">
+                    <div class="log-line">> Initializing raw socket connection to host...</div>
+                </div>
+
+                <div class="progress-section">
+                    <div class="progress-header">
+                        <span id="progressStatusLabel">UNAUTHORIZED BLOCK ACCESS IN PROGRESS...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+
+                <!-- Access Key Input -->
+                <div class="input-group">
+                    <input type="password" class="terminal-input" id="accessKeyInput" placeholder="ENTER OVERRIDE ACCESS KEY..." autocomplete="off">
+                    <button class="ctrl-btn" onclick="submitAccessKey()">SUBMIT</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Critical Lockdown Modal -->
+    <div class="lockdown-modal" id="lockdownModal">
+        <div class="lockdown-icon">⚠️</div>
+        <div class="lockdown-title">CRITICAL SYSTEM FAILURE - LOCKDOWN ACTIVE</div>
+        <div class="lockdown-desc">
+            [FATAL ERROR 0x8007045D]: KERNEL_SECURITY_CHECK_FAILURE<br>
+            --------------------------------------------------<br>
+            All critical system threads halted. Sector table encryption complete.<br>
+            Physical Offset: 0x00000000F7A3C8E1<br>
+            Status: SYSTEM PERMANENTLY LOCKED OUT
+        </div>
+        <div class="lockdown-actions">
+            <button class="override-btn" onclick="resetSimulationSequence()">REBOOT SYSTEM 🔄</button>
+        </div>
+    </div>
+
+    <script>
+        /* ==========================================
+         * 1. RESPONSIVE MATRIX RAIN CANVAS EFFECT
+         * ========================================== */
+        const canvas = document.getElementById("matrixCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let fontSize = 16;
+        let columns = 0;
+        let drops = [];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            fontSize = window.innerWidth < 600 ? 12 : 16;
+            columns = Math.floor(canvas.width / fontSize);
+            drops = Array(columns).fill(1);
+        }
+        resizeCanvas();
+        window.addEventListener("resize", resizeCanvas);
+
+        const matrixChars = "ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ1234567890ABCDEF$#@%&*";
+
+        function drawMatrix() {
+            ctx.fillStyle = "rgba(2, 6, 3, 0.08)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.font = fontSize + "px monospace";
+
+            for (let i = 0; i < drops.length; i++) {
+                const text = matrixChars.charAt(Math.floor(Math.random() * matrixChars.length));
+                const x = i * fontSize;
+                const y = drops[i] * fontSize;
+
+                if (Math.random() > 0.88) {
+                    ctx.fillStyle = "#ffffff";
+                    ctx.shadowBlur = 6;
+                    ctx.shadowColor = "#ffffff";
+                } else {
+                    ctx.fillStyle = "#00ff66";
+                    ctx.shadowBlur = 3;
+                    ctx.shadowColor = "#00ff66";
+                }
+
+                ctx.fillText(text, x, y);
+                ctx.shadowBlur = 0;
+
+                if (y > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            }
+        }
+        setInterval(drawMatrix, 33);
+
+        /* ==========================================
+         * 2. WEB AUDIO API SYNTHESIZER
+         * ========================================== */
+        let audioCtx = null;
+        let isMuted = false;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playTerminalBeep() {
+            if (isMuted || !audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(600 + Math.random() * 400, audioCtx.currentTime);
+                
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.05);
+            } catch (e) {}
+        }
+
+        let alarmInterval = null;
+        function playEmergencySiren() {
+            if (isMuted || !audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(850, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(320, audioCtx.currentTime + 0.3);
+
+                gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.008, audioCtx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } catch (e) {}
+        }
+
+        function startAlarmLoop() {
+            if (!alarmInterval) {
+                alarmInterval = setInterval(playEmergencySiren, 420);
+            }
+        }
+
+        function stopAlarmLoop() {
+            if (alarmInterval) {
+                clearInterval(alarmInterval);
+                alarmInterval = null;
+            }
+        }
+
+        /* ==========================================
+         * 3. LOG DIAGNOSTIC TELEMETRY LOGIC
+         * ========================================== */
+        const logsSequence = [
+            { text: "> Establishing socket connection [port 443]...", delay: 800 },
+            { text: "> Injecting shellcode payload into memory range 0x7FFF000...", delay: 1100 },
+            { text: "> Escalating system privileges to NT AUTHORITY\\SYSTEM...", delay: 1000 },
+            { text: "> Accessing SAM database & shadow copies C:\\Windows\\System32\\config", delay: 1100, type: "warning" },
+            { text: "> Extracting AES-256 private key certificates...", delay: 1300 },
+            { text: "> ALERT: Kernel Integrity Guard triggered active response!", delay: 1000, type: "danger" },
+            { text: "> Encrypting disk volume sector headers (MFT lock)...", delay: 1400, type: "danger" },
+            { text: "> Exfiltrating user directory structures to remote socket...", delay: 1200 },
+            { text: "> CRITICAL OVERLOAD: FORCED SYSTEM HALT EXECUTED!", delay: 1400, type: "danger" }
+        ];
+
+        const logDisplay = document.getElementById("logDisplay");
+        const progressFill = document.getElementById("progressFill");
+        const progressPercent = document.getElementById("progressPercent");
+        const progressStatusLabel = document.getElementById("progressStatusLabel");
+        const terminalCard = document.getElementById("terminalCard");
+        const alarmOverlay = document.getElementById("alarmOverlay");
+        const mainTitleBanner = document.getElementById("mainTitleBanner");
+        const headerStatusText = document.getElementById("headerStatusText");
+        const lockdownModal = document.getElementById("lockdownModal");
+
+        let logIndex = 0;
+        let progressVal = 0;
+        let stepTimer = null;
+        let progressInterval = null;
+
+        function appendLogLine(text, type = "normal") {
+            const line = document.createElement("div");
+            line.className = "log-line " + type;
+            line.innerText = text;
+            logDisplay.appendChild(line);
+            logDisplay.scrollTop = logDisplay.scrollHeight;
+            playTerminalBeep();
+        }
+
+        function runSimulationStep() {
+            if (logIndex < logsSequence.length) {
+                const current = logsSequence[logIndex];
+                appendLogLine(current.text, current.type || "normal");
+                logIndex++;
+
+                if (logIndex >= 5) {
+                    terminalCard.classList.add("breach-alert");
+                    alarmOverlay.style.display = "block";
+                    mainTitleBanner.innerText = "🚨 SYSTEM BREACH: INCIDENT ESCALATION";
+                    headerStatusText.innerText = "WARNING: UNAUTHORIZED OVERRIDE";
+                    startAlarmLoop();
+                }
+
+                stepTimer = setTimeout(runSimulationStep, current.delay);
+            }
+        }
+
+        function startProgressAnimation() {
+            progressInterval = setInterval(() => {
+                if (progressVal < 100) {
+                    progressVal += 1.25;
+                    if (progressVal > 100) progressVal = 100;
+                    
+                    progressFill.style.width = progressVal + "%";
+                    progressPercent.innerText = Math.round(progressVal) + "%";
+
+                    if (progressVal >= 100) {
+                        clearInterval(progressInterval);
+                        progressStatusLabel.innerText = "SYSTEM HALT: UNRECOVERABLE BREACH";
+                        
+                        setTimeout(() => {
+                            stopAlarmLoop();
+                            alarmOverlay.style.display = "none";
+                            lockdownModal.style.display = "block";
+                        }, 1400);
+                    }
+                }
+            }, 120);
+        }
+
+        function resetSimulationSequence() {
+            clearTimeout(stepTimer);
+            clearInterval(progressInterval);
+            stopAlarmLoop();
+
+            logIndex = 0;
+            progressVal = 0;
+            logDisplay.innerHTML = "";
+            progressFill.style.width = "0%";
+            progressPercent.innerText = "0%";
+            progressStatusLabel.innerText = "UNAUTHORIZED BLOCK ACCESS IN PROGRESS...";
+
+            terminalCard.classList.remove("breach-alert");
+            alarmOverlay.style.display = "none";
+            lockdownModal.style.display = "none";
+            mainTitleBanner.innerText = "⚠️ CRITICAL SECURITY BREACH DETECTED";
+            headerStatusText.innerText = "UNAUTHORIZED KERNEL EXFILTRATION";
+
+            appendLogLine("> Initializing raw socket connection to host...");
+            runSimulationStep();
+            startProgressAnimation();
+        }
+
+        function submitAccessKey() {
+            const input = document.getElementById("accessKeyInput");
+            if (input.value.trim() !== "") {
+                appendLogLine("> OVERRIDE KEY REJECTED: INVALID AUTHORIZATION TOKEN", "danger");
+                input.value = "";
+                playEmergencySiren();
+            }
+        }
+
+        /* ==========================================
+         * 4. EVENT LISTENERS
+         * ========================================== */
+        document.getElementById("startSimulationBtn").addEventListener("click", () => {
+            initAudio();
+            document.getElementById("startOverlay").style.display = "none";
+            resetSimulationSequence();
+        });
+
+        const soundToggleBtn = document.getElementById("soundToggleBtn");
+        soundToggleBtn.addEventListener("click", () => {
+            isMuted = !isMuted;
+            soundToggleBtn.innerText = isMuted ? "🔇 AUDIO: MUTED" : "🔊 AUDIO: ON";
+            if (isMuted) stopAlarmLoop();
+            else if (progressVal >= 50 && progressVal < 100) startAlarmLoop();
+        });
+
+        const fullscreenBtn = document.getElementById("fullscreenBtn");
+        fullscreenBtn.addEventListener("click", () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {});
+                fullscreenBtn.innerText = "⛶ EXIT FULLSCREEN";
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                    fullscreenBtn.innerText = "⛶ FULLSCREEN";
+                }
+            }
+        });
+    </script>
+</body>
+</html>
